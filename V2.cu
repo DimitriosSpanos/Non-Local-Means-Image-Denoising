@@ -4,19 +4,19 @@
 #include <math.h>
 #include <stdbool.h>
 
-#define PIXELS 64 // meaning image with 64x64 pixels
+#define PIXELS 256 // meaning image with 64x64 pixels
 #define filtSigma 0.02
-#define patchSize 3
+#define patchSize 7
 #define patchSigma 3
-__device__ void comparison(float *comparison_value,float *Pi, int j, float *G, float *shared_memory, int dev_PIXELS, int dev_padding, int dev_patchSize);
-__device__ void compute_weight(float *w, float *Pi, int j, float *G, float *shared_memory, int dev_PIXELS, int dev_padding, float dev_filtSigma, int dev_patchSize);
+__device__ void comparison(float *comparison_value,float *Pi, int j, float *G, float *shared_memory);
+__device__ void compute_weight(float *w, float *Pi, int j, float *G, float *shared_memory);
 __host__ float * gaussian();
 __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, float *G);
 //! global variables
-__device__ const int global_dev_PIXELS = PIXELS;
-__device__ const float global_dev_filtSigma = (float)filtSigma;
-__device__ const int global_dev_patchSize = patchSize;
-
+__device__ const int dev_PIXELS = PIXELS;
+__device__ const float dev_filtSigma = (float)filtSigma;
+__device__ const int dev_patchSize = patchSize;
+__device__ const int dev_padding = patchSize/2;
 
 
 __host__ float *nonLocalMeans(float *host_image){
@@ -73,11 +73,7 @@ __host__ float *nonLocalMeans(float *host_image){
 
 
 __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, float *G){
-	const int dev_PIXELS = global_dev_PIXELS;
-	const int dev_patchSize = global_dev_patchSize;
-	const int dev_padding = dev_patchSize/2;
-	const float dev_filtSigma = global_dev_filtSigma;
-	
+
 	// index i is calculated so that it iterates the original image minus the padding
 	int i = blockIdx.x*(blockDim.x+2*dev_padding)+(threadIdx.x+dev_padding) + dev_padding*dev_PIXELS+2*dev_padding*dev_padding;
 	
@@ -87,7 +83,7 @@ __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, fl
 		int row_size = (dev_PIXELS+2*dev_padding);
 		
 		// Creation of Patch i
-		float Pi[dev_patchSize*dev_patchSize*sizeof(float)];
+		float Pi[dev_patchSize*dev_patchSize];
 		for(int k=0; k<dev_patchSize; k++){
 			for(int l=0; l<dev_patchSize; l++)
 				Pi[k*dev_patchSize + l] = image[i +(k-dev_padding)*row_size + l-dev_padding];
@@ -98,9 +94,11 @@ __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, fl
 		extern __shared__ float shared_memory[];
 		
 		
-		
+		// Initialization of shared memory
+		// each thread is responsible for its respective column
 		for(int s=0; s<dev_patchSize; s++)
 			shared_memory[ (threadIdx.x +dev_padding) + s*row_size] = image[(threadIdx.x +dev_padding) + s*row_size];
+		// the first thread is responsible for the padding of "-1" of shared memory
 		if(threadIdx.x == 0){
 			for(int c=0; c<dev_padding; c++)
 				for(int s=0; s<dev_patchSize; s++)
@@ -119,10 +117,11 @@ __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, fl
 		for(int r=dev_padding; r<dev_PIXELS+dev_padding; r++){
 			for(int j=dev_padding; j<(dev_PIXELS+dev_padding); j++){	
 				
-				compute_weight(&w, Pi, j, G, shared_memory, dev_PIXELS, dev_padding, dev_filtSigma, dev_patchSize);
+				compute_weight(&w, Pi, j, G, shared_memory);
 				Z += w;
 				f_image[i] += w * shared_memory[dev_padding*row_size+j];
 			}
+			// Update the shared memory so that it contains the pixels for the next row (slide down the shared memory)
 			__syncthreads();
 			for(int s=0; s<dev_patchSize-1; s++)
 				shared_memory[ (threadIdx.x +dev_padding) + s*row_size] = shared_memory[(threadIdx.x +dev_padding) + (s+1)*row_size];
@@ -130,7 +129,6 @@ __global__ void compute_f_pixel(float *f_image,float *image, int padded_size, fl
 			
 			int offset =  (r-dev_padding + 1)*row_size;
 			shared_memory[(threadIdx.x +dev_padding) + (dev_patchSize-1)*row_size] = image[offset+(threadIdx.x +dev_padding) + (dev_patchSize-1)*row_size];
-			
 			__syncthreads();
 		}
 		f_image[i] = f_image[i] / Z; 
@@ -180,7 +178,7 @@ __host__ int main(){
 
 
 //! Compares Patch i and Patch j
-__device__ void comparison(float *comparison_value,float *Pi, int j, float *G, float *shared_memory, int dev_PIXELS, int dev_padding, int dev_patchSize){
+__device__ void comparison(float *comparison_value,float *Pi, int j, float *G, float *shared_memory){
 	
 	j = j + dev_padding*(dev_PIXELS+2*dev_padding);
     for(int k=0; k<dev_patchSize; k++){
@@ -195,9 +193,9 @@ __device__ void comparison(float *comparison_value,float *Pi, int j, float *G, f
 
 
 //! Computes the w(i,j)
-__device__ void compute_weight(float *w, float *Pi, int j, float *G, float *shared_memory, int dev_PIXELS, int dev_padding, float dev_filtSigma, int dev_patchSize){
+__device__ void compute_weight(float *w, float *Pi, int j, float *G, float *shared_memory){
 	float comparison_value = 0;
-	comparison(&comparison_value, Pi, j, G, shared_memory, dev_PIXELS, dev_padding, dev_patchSize);
+	comparison(&comparison_value, Pi, j, G, shared_memory);
 	*w = (float)(exp(-comparison_value/(dev_filtSigma*dev_filtSigma)));
 }
 
