@@ -13,7 +13,7 @@ module load cuda/10.1.243
 #nvidia-smi
 make clean
 make all
-./V0
+#./V0
 ./V1
 ./V2
 make clean
