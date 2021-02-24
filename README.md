@@ -1,9 +1,10 @@
 # Parallel-Exercise3
 
 
-To test locally, I recommend you use a 128x128 png. Run the **image_read** script. You will 
-be shown the original image but grayscaled and the image with noise. Then, run the program
-and after that press any key so that the filtered image is shown in matlab.
+To test locally, I recommend you use a 64x64,128x128 or 256x256 png (RGB is fine).
+Run the **image_read** script. You will be shown the original image but grayscaled
+and the image with noise. Then, run the program and after that press any key so
+that the filtered image is shown in matlab.
 
 ```
 1. Run script
